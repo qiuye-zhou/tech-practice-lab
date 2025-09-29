@@ -169,12 +169,12 @@ async function startUpload(file) {
 
 // 上传单个分片请求逻辑
 async function uploadChunk(chunk, index, totalChunks) {
-  if (uploadChunks.has(chunk.index)) {
+  if (uploadedChunks.has(chunk.index)) {
     return;
   }
   currentChunk.textContent = `${index + 1}/${totalChunks}`;
   currentChunkProgressBar.value = 0;
-  uploadChunks.add(chunk.index);
+  uploadedChunks.add(chunk.index);
   localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
   try {
     const formData = new FormData();
@@ -195,7 +195,7 @@ async function uploadChunk(chunk, index, totalChunks) {
       const listItem = document.createElement('li');
       listItem.textContent = `分片 ${data.chunkIndex + 1}/${data.totalChunks} 上传成功 (文件ID: ${data.fileId})`;
       listItem.style.color = 'green';
-      chunkResultsList.appendChild(listItem);
+      chunkUploadResultsList.appendChild(listItem);
 
       if (uploadedChunks.size === totalChunks) {
         await mergeChunks();
@@ -204,7 +204,7 @@ async function uploadChunk(chunk, index, totalChunks) {
       const listItem = document.createElement('li');
       listItem.textContent = `分片 ${index + 1}/${totalChunks} 上传失败`;
       listItem.style.color = 'red';
-      chunkResultsList.appendChild(listItem);
+      chunkUploadResultsList.appendChild(listItem);
       throw new Error('合并文件失败');
     }
   } catch (error) {
