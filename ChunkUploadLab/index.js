@@ -63,7 +63,7 @@ const chunkUploadResultsList = document.getElementById('chunkUploadResultsList')
 let currentFile = null;
 let fileId = null;
 let fileHash = '';
-let uploader = new controlsUploader(5);
+let uploader = new controlsUploader(3);
 let uploadedChunks = new Set();
 
 fileInput.addEventListener('change', (event) => {
@@ -127,7 +127,7 @@ async function startUpload(file) {
       },
     });
     const data = await response.json();
-    if (data.success) {
+    if (response.ok) {
       if (data.exists) {
         showStatus('文件已存在，秒传成功！', 'success');
         resetUI();
@@ -150,7 +150,7 @@ async function startUpload(file) {
   try {
     const response = await fetch(`/upload-file-status/${fileId}`, { method: 'GET' });
     const data = await response.json();
-    if (data.success) {
+    if (response.ok) {
       data.uploadedChunks.forEach(index => uploadedChunks.add(index));
       localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
     }
@@ -169,12 +169,12 @@ async function startUpload(file) {
 
 // 上传单个分片请求逻辑
 async function uploadChunk(chunk, index, totalChunks) {
-  if (uploadedChunks.has(chunk.index)) {
+  if (uploadedChunks.has(index)) {
     return;
   }
   currentChunk.textContent = `${index + 1}/${totalChunks}`;
   currentChunkProgressBar.value = 0;
-  uploadedChunks.add(chunk.index);
+  uploadedChunks.add(index);
   localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
   try {
     const formData = new FormData();
@@ -189,7 +189,7 @@ async function uploadChunk(chunk, index, totalChunks) {
     });
 
     const data = await response.json();
-    if (data.success) {
+    if (response.ok) {
       uploadedChunks.add(index);
       updateProgress();
       const listItem = document.createElement('li');
@@ -228,7 +228,7 @@ async function mergeChunks() {
       }),
     });
     const data = await response.json();
-    if (data.success) {
+    if (response.ok) {
       showStatus('文件上传成功', 'success');
       resetUI();
     } else {
