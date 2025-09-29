@@ -25,7 +25,9 @@ const storage = multer.diskStorage({
   },
   // 定义文件名生成规则
   filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + path.extname(file.originalname));
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    cb(null, `${timestamp}-${random}`);
   }
 });
 
@@ -45,7 +47,20 @@ app.post('/upload-chunk', upload.single('file'), async (req, res) => {
     const oldPath = req.file.path;
     const newPath = path.join(path.dirname(oldPath), `${fileId}-${chunkIndex}`);
 
-    await fs.rename(oldPath, newPath);
+    // 检查源文件是否存在
+    try {
+      await fs.access(oldPath);
+      await fs.rename(oldPath, newPath);
+    } catch (error) {
+      console.error(`File rename error: ${error.message}`);
+      // 如果重命名失败，尝试直接使用原文件名
+      if (error.code === 'ENOENT') {
+        console.log(`Source file not found: ${oldPath}, skipping rename`);
+        // 不进行重命名，直接使用原文件名
+      } else {
+        throw error;
+      }
+    }
 
     console.log(`Uploaded chunk ${parseInt(chunkIndex) + 1}/${totalChunks} for file ${fileId}`);
 
@@ -77,19 +92,26 @@ app.post('/merge', express.json(), async (req, res) => {
     const chunkFiles = files
       .filter(file => file.startsWith(fileId + '-'))
       .map(file => {
-        const chunkIndex = parseInt(file.split('-')[1]);
+        const parts = file.split('-');
+        const chunkIndex = parseInt(parts[1]);
         return { index: chunkIndex, name: file };
       })
+      .filter(chunk => !isNaN(chunk.index))
       .sort((a, b) => a.index - b.index);
 
     // 创建写入流，用于合并文件
-    const writeStream = fsSync.createWriteStream(targetPath);
+    const writeStream = require('fs').createWriteStream(targetPath);
 
     // 按顺序合并分片
     for (const chunkFile of chunkFiles) {
       const chunkPath = path.join(chunksDir, chunkFile.name);
-      const chunkData = await fs.readFile(chunkPath);
-      writeStream.write(chunkData);
+      try {
+        const chunkData = await fs.readFile(chunkPath);
+        writeStream.write(chunkData);
+      } catch (error) {
+        console.error(`Error reading chunk ${chunkFile.name}: ${error.message}`);
+        throw new Error(`无法读取分片文件: ${chunkFile.name}`);
+      }
     }
 
     writeStream.end();
@@ -101,7 +123,12 @@ app.post('/merge', express.json(), async (req, res) => {
 
     // 合并完成后删除分片文件
     for (const chunkFile of chunkFiles) {
-      await fs.unlink(path.join(chunksDir, chunkFile.name));
+      try {
+        await fs.unlink(path.join(chunksDir, chunkFile.name));
+      } catch (error) {
+        console.error(`Error deleting chunk ${chunkFile.name}: ${error.message}`);
+        // 继续删除其他文件，不中断流程
+      }
     }
 
     // 创建或更新存在的文件元数据

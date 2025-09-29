@@ -144,7 +144,7 @@ async function startUpload(file) {
 
   const localChunks = localStorage.getItem(`uploadedChunks_${fileId}`);
   if (localChunks) {
-    JSON.parse(savedChunks).forEach(index => uploadedChunks.add(index));
+    JSON.parse(localChunks).forEach(index => uploadedChunks.add(index));
   }
 
   try {
@@ -174,8 +174,6 @@ async function uploadChunk(chunk, index, totalChunks) {
   }
   currentChunk.textContent = `${index + 1}/${totalChunks}`;
   currentChunkProgressBar.value = 0;
-  uploadedChunks.add(index);
-  localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
   try {
     const formData = new FormData();
     formData.append('file', chunk);
@@ -191,6 +189,7 @@ async function uploadChunk(chunk, index, totalChunks) {
     const data = await response.json();
     if (response.ok) {
       uploadedChunks.add(index);
+      localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
       updateProgress();
       const listItem = document.createElement('li');
       listItem.textContent = `分片 ${data.chunkIndex + 1}/${data.totalChunks} 上传成功 (文件ID: ${data.fileId})`;
@@ -205,10 +204,13 @@ async function uploadChunk(chunk, index, totalChunks) {
       listItem.textContent = `分片 ${index + 1}/${totalChunks} 上传失败`;
       listItem.style.color = 'red';
       chunkUploadResultsList.appendChild(listItem);
-      throw new Error('合并文件失败');
+      throw new Error('上传分片失败');
     }
   } catch (error) {
     showStatus(`上传分片 ${index} 出错: ${error.message}`, 'error');
+    // 从已上传列表中移除失败的分片，允许重试
+    uploadedChunks.delete(index);
+    localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
     throw new Error(`上传分片出错: ${error.message}`);
   }
 }
@@ -240,11 +242,11 @@ async function mergeChunks() {
 }
 
 // 生成唯一文件ID
-function generateFileId(file) {
+function generateFileId() {
   if (typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `${file.name}-${file.size}-${file.lastModified}-${Date.now()}`;
+  return `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
 // 计算文件Hash(实现秒传功能)
