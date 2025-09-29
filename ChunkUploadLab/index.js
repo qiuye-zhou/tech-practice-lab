@@ -174,6 +174,9 @@ async function uploadChunk(chunk, index, totalChunks) {
   }
   currentChunk.textContent = `${index + 1}/${totalChunks}`;
   currentChunkProgressBar.value = 0;
+  
+  console.log(`Uploading chunk ${index + 1}/${totalChunks} for file ${fileId}`);
+  
   try {
     const formData = new FormData();
     formData.append('file', chunk);
@@ -196,18 +199,22 @@ async function uploadChunk(chunk, index, totalChunks) {
       listItem.style.color = 'green';
       chunkUploadResultsList.appendChild(listItem);
 
+      console.log(`Chunk ${index + 1} uploaded successfully. Total uploaded: ${uploadedChunks.size}/${totalChunks}`);
+
       if (uploadedChunks.size === totalChunks) {
+        console.log('All chunks uploaded, starting merge...');
         await mergeChunks();
       }
     } else {
       const listItem = document.createElement('li');
-      listItem.textContent = `分片 ${index + 1}/${totalChunks} 上传失败`;
+      listItem.textContent = `分片 ${index + 1}/${totalChunks} 上传失败: ${data.error || '未知错误'}`;
       listItem.style.color = 'red';
       chunkUploadResultsList.appendChild(listItem);
-      throw new Error('上传分片失败');
+      throw new Error(`上传分片失败: ${data.error || '未知错误'}`);
     }
   } catch (error) {
-    showStatus(`上传分片 ${index} 出错: ${error.message}`, 'error');
+    console.error(`Error uploading chunk ${index}:`, error);
+    showStatus(`上传分片 ${index + 1} 出错: ${error.message}`, 'error');
     // 从已上传列表中移除失败的分片，允许重试
     uploadedChunks.delete(index);
     localStorage.setItem(`uploadedChunks_${fileId}`, JSON.stringify([...uploadedChunks]));
@@ -218,6 +225,9 @@ async function uploadChunk(chunk, index, totalChunks) {
 // 合并分片请求逻辑
 async function mergeChunks() {
   try {
+    console.log(`Starting merge for file ${currentFile.name} with ID ${fileId}`);
+    showStatus('正在合并文件...', 'info');
+    
     const response = await fetch('/merge', {
       method: 'POST',
       headers: {
@@ -229,14 +239,19 @@ async function mergeChunks() {
         fileName: currentFile.name,
       }),
     });
+    
     const data = await response.json();
     if (response.ok) {
+      console.log('File merge completed successfully');
       showStatus('文件上传成功', 'success');
+      // 清理本地存储的上传记录
+      localStorage.removeItem(`uploadedChunks_${fileId}`);
       resetUI();
     } else {
-      throw new Error('合并文件失败');
+      throw new Error(data.error || '合并文件失败');
     }
   } catch (error) {
+    console.error('Merge error:', error);
     showStatus(`合并文件出错: ${error.message}`, 'error');
   }
 }

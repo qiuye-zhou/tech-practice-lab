@@ -47,22 +47,22 @@ app.post('/upload-chunk', upload.single('file'), async (req, res) => {
     const oldPath = req.file.path;
     const newPath = path.join(path.dirname(oldPath), `${fileId}-${chunkIndex}`);
 
-    // 检查源文件是否存在
+    // 检查源文件是否存在并重命名
     try {
       await fs.access(oldPath);
       await fs.rename(oldPath, newPath);
+      console.log(`Renamed chunk file from ${oldPath} to ${newPath}`);
     } catch (error) {
       console.error(`File rename error: ${error.message}`);
-      // 如果重命名失败，尝试直接使用原文件名
       if (error.code === 'ENOENT') {
-        console.log(`Source file not found: ${oldPath}, skipping rename`);
-        // 不进行重命名，直接使用原文件名
+        console.log(`Source file not found: ${oldPath}, using original path`);
+        // 如果源文件不存在，直接使用原路径
       } else {
         throw error;
       }
     }
 
-    console.log(`Uploaded chunk ${parseInt(chunkIndex) + 1}/${totalChunks} for file ${fileId}`);
+    console.log(`Successfully uploaded chunk ${parseInt(chunkIndex) + 1}/${totalChunks} for file ${fileId}`);
 
     // 返回上传成功的响应
     res.json({
@@ -73,7 +73,7 @@ app.post('/upload-chunk', upload.single('file'), async (req, res) => {
     });
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).json({ error: '上传分片失败' });
+    res.status(500).json({ error: '上传分片失败', details: error.message });
   }
 });
 
@@ -85,19 +85,33 @@ app.post('/merge', express.json(), async (req, res) => {
       return res.status(400).json({ error: '缺少 fileHash 参数' });
     }
 
+    console.log(`Starting merge for file ${fileName} with ID ${fileId}`);
+
     const chunksDir = path.join(__dirname, 'uploads', 'chunks');
     const targetPath = path.join(__dirname, 'uploads', fileName);
 
+    // 确保目标目录存在
+    await ensureUploadDirs();
+
     const files = await fs.readdir(chunksDir);
+    console.log(`Found ${files.length} files in chunks directory`);
+
     const chunkFiles = files
       .filter(file => file.startsWith(fileId + '-'))
       .map(file => {
-        const parts = file.split('-');
-        const chunkIndex = parseInt(parts[1]);
+        // 使用 lastIndexOf 来找到最后一个 '-' 的位置，因为 fileId 本身包含 '-'
+        const lastDashIndex = file.lastIndexOf('-');
+        const chunkIndex = parseInt(file.substring(lastDashIndex + 1));
         return { index: chunkIndex, name: file };
       })
       .filter(chunk => !isNaN(chunk.index))
       .sort((a, b) => a.index - b.index);
+
+    console.log(`Found ${chunkFiles.length} chunk files for file ${fileId}`);
+
+    if (chunkFiles.length === 0) {
+      return res.status(400).json({ error: '没有找到分片文件' });
+    }
 
     // 创建写入流，用于合并文件
     const writeStream = require('fs').createWriteStream(targetPath);
@@ -106,10 +120,12 @@ app.post('/merge', express.json(), async (req, res) => {
     for (const chunkFile of chunkFiles) {
       const chunkPath = path.join(chunksDir, chunkFile.name);
       try {
+        console.log(`Reading chunk ${chunkFile.name} (index: ${chunkFile.index})`);
         const chunkData = await fs.readFile(chunkPath);
         writeStream.write(chunkData);
       } catch (error) {
         console.error(`Error reading chunk ${chunkFile.name}: ${error.message}`);
+        writeStream.destroy();
         throw new Error(`无法读取分片文件: ${chunkFile.name}`);
       }
     }
@@ -117,14 +133,18 @@ app.post('/merge', express.json(), async (req, res) => {
     writeStream.end();
 
     // 等待写入完成
-    await new Promise((resolve) => {
+    await new Promise((resolve, reject) => {
       writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
     });
+
+    console.log(`File ${fileName} written successfully`);
 
     // 合并完成后删除分片文件
     for (const chunkFile of chunkFiles) {
       try {
         await fs.unlink(path.join(chunksDir, chunkFile.name));
+        console.log(`Deleted chunk file: ${chunkFile.name}`);
       } catch (error) {
         console.error(`Error deleting chunk ${chunkFile.name}: ${error.message}`);
         // 继续删除其他文件，不中断流程
@@ -149,7 +169,7 @@ app.post('/merge', express.json(), async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Merge error:', error);
-    res.status(500).json({ error: '合并文件失败' });
+    res.status(500).json({ error: '合并文件失败', details: error.message });
   }
 });
 
@@ -200,7 +220,9 @@ app.get('/upload-file-status/:fileId', async (req, res) => {
 
     for (const file of files) {
       if (file.startsWith(fileId + '-')) {
-        const chunkIndex = parseInt(file.split('-')[1]);
+        // 使用 lastIndexOf 来找到最后一个 '-' 的位置，因为 fileId 本身包含 '-'
+        const lastDashIndex = file.lastIndexOf('-');
+        const chunkIndex = parseInt(file.substring(lastDashIndex + 1));
         if (!isNaN(chunkIndex)) {
           uploadedChunks.push(chunkIndex);
         }
